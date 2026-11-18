@@ -81,6 +81,8 @@ models, and local workflow edits live under `.data/` and are never committed.
 - ComfyUI queue monitoring over WebSocket with HTTP fallback.
 - Session gallery, thumbnails, failed-slot recovery, and optional upscaling.
 - Optional OpenRouter assistant for prompt editing and transition-frame generation.
+- Scenario-to-storyboard planning with a locked character reference.
+- Montage-ready export of numbered PNG frames per session.
 - Installable PWA frontend with no JavaScript build step.
 
 ## Requirements
@@ -120,6 +122,30 @@ refinement. It preserves the checkpoint and LoRAs currently selected by the user
 
 The first run copies source defaults into `.data/`. Editing prompt databases or
 workflows through the application never changes the files committed in `defaults/`.
+
+## Scenario to storyboard
+
+Click **Scenario** in the header, describe a story (for example, *"What if the
+Ottoman Empire still existed in 2026..."*), and choose 2–12 scenes. The assistant:
+
+1. splits the scenario into ordered scenes with an opening, development, and a
+   final scene;
+2. locks one character reference — subject, facial appearance, wardrobe, and a
+   single drawing style with an explicit color palette — and writes every scene
+   prompt with the `{style}`, `{subject}`, `{appearance}`, and `{wardrobe}`
+   placeholders so each frame receives the identical reference;
+3. saves everything as a new, editable set of databases and queues the frames
+   sequentially (Scene 1 → Scene 2 → ...). Failed frames can be re-run with
+   **Run Failed**.
+
+Open a session and click **Export PNGs** to download a montage-ready ZIP: one
+numbered PNG per scene (`001.png`, `002.png`, ...), a `shotlist.txt`, and a
+`storyboard.json` manifest. For each scene the latest revision is exported,
+and upscaled versions take precedence. Scenes without a finished image are
+listed as `MISSING`. The same export is available at
+`GET /api/sessions/{session_id}/export`.
+
+This feature needs an OpenRouter API key, like the other assistant features.
 
 ## Included manga demo
 
