@@ -12,7 +12,7 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/css/styles.css">
-<script src="/static/js/app.js?v=9" defer></script>
+<script src="/static/js/app.js?v=10" defer></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
@@ -75,6 +75,16 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
             d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 002-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
         </svg>
+      </button>
+
+      <!-- Scenario Storyboard Button -->
+      <button id="btnStoryboard" onclick="openStoryboardModal()"
+        class="bg-violet-700 hover:bg-violet-600 active:scale-95 px-3 py-2 rounded-lg text-xs sm:text-sm font-semibold transition shadow-md flex items-center gap-1.5"
+        title="Scenario to storyboard">
+        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h10M4 18h7m9-3l-3 3-3-3m3 3V10"/>
+        </svg>
+        Scenario
       </button>
 
       <!-- New Batch Button (+) -->
@@ -401,6 +411,44 @@
       <button id="btnSubmitEdit" onclick="submitEdit()"
         style="width:100%;background:#2563eb;color:#fff;border:none;border-radius:10px;padding:14px;font-size:14px;font-weight:600;cursor:pointer;transition:background 0.15s;">
         Re-queue Prompt
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── MODAL: SCENARIO → STORYBOARD ──────────────────────────────────────── -->
+<div id="storyboardModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:10000;align-items:center;justify-content:center;padding:8px;backdrop-filter:blur(4px);">
+  <div style="background:#111827;border:1px solid #1f2937;border-radius:16px;width:100%;max-width:560px;display:flex;flex-direction:column;overflow:hidden;max-height:95dvh;position:relative;">
+    <button onclick="closeStoryboardModal()"
+      style="position:absolute;top:12px;right:12px;background:#1f2937;color:#fff;border:none;border-radius:50%;width:36px;height:36px;font-weight:bold;font-size:15px;cursor:pointer;z-index:10;display:flex;align-items:center;justify-content:center;">
+      ✕
+    </button>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:14px;overflow-y:auto;" class="no-scrollbar">
+      <div>
+        <h2 style="font-size:18px;font-weight:700;color:#fff;">Scenario → Storyboard</h2>
+        <p style="font-size:11px;color:#6b7280;margin-top:2px;">The AI splits your scenario into scenes, locks one character reference (face, outfit, style, palette) and queues every frame in order.</p>
+      </div>
+      <div>
+        <label style="display:block;font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:4px;">Scenario</label>
+        <textarea id="sbScenario" rows="5" placeholder="2026 yılında Osmanlı İmparatorluğu hâlâ yaşasaydı..." style="width:100%;background:#1f2937;border:1px solid #374151;border-radius:8px;padding:8px 10px;color:#fff;font-size:13px;outline:none;resize:vertical;"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <div style="flex:1;">
+          <label style="display:block;font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:4px;">Scenes</label>
+          <input id="sbCount" type="number" min="2" max="12" value="5" style="width:100%;background:#1f2937;border:1px solid #374151;border-radius:8px;padding:8px 10px;color:#fff;font-size:13px;outline:none;">
+        </div>
+        <div style="flex:2;">
+          <label style="display:block;font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:4px;">Project name (optional)</label>
+          <input id="sbName" type="text" placeholder="ottoman_2026" style="width:100%;background:#1f2937;border:1px solid #374151;border-radius:8px;padding:8px 10px;color:#fff;font-size:13px;outline:none;">
+        </div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#d1d5db;">
+        <input id="sbGenerate" type="checkbox" checked> Queue images immediately
+      </label>
+      <div id="sbResult" style="display:none;flex-direction:column;gap:8px;"></div>
+      <button id="btnSubmitStoryboard" onclick="submitStoryboard()"
+        style="width:100%;background:#6d28d9;color:#fff;border:none;border-radius:10px;padding:14px;font-size:14px;font-weight:600;cursor:pointer;">
+        Split into scenes &amp; generate
       </button>
     </div>
   </div>

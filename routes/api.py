@@ -7,11 +7,12 @@ import time
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 import src.core as cfg
@@ -37,6 +38,16 @@ from src.core import (
     upsert_session,
 )
 from src.enums import Appearance, GenerationConfig, Pose, Scene, Style, Subject, Wardrobe
+from src.storyboard import (
+    MAX_SCENES,
+    MIN_SCENES,
+    StoryboardPlanError,
+    build_montage_zip,
+    build_planner_messages,
+    parse_plan,
+    scenes_db,
+    single_value_db,
+)
 from src.workflows import (
     ComfyClient,
     ComfyQueueError,
@@ -481,9 +492,7 @@ async def set_active_database(req: SetActiveDbRequest) -> JsonDict:
 
 
 @router.delete("/api/databases/{name}")
-async def delete_database(
-    name: str, db_type: str = Query("prompts", alias="type")
-) -> JsonDict:
+async def delete_database(name: str, db_type: str = Query("prompts", alias="type")) -> JsonDict:
     if db_type not in cfg.DB_TYPES:
         db_type = "prompts"
     name = _validate_database_name(name)
@@ -1322,6 +1331,100 @@ async def delete_segment_job(req: DeleteJobRequest) -> JsonDict:
 
 
 # =====================================================================
+# 5b. Scenario → Storyboard
+# =====================================================================
+STORYBOARD_DB_TYPES = ("subjects", "appearances", "wardrobes", "styles", "scenes", "poses")
+REFERENCE_FIELD_BY_DB = {
+    "subjects": "subject",
+    "appearances": "appearance",
+    "wardrobes": "wardrobe",
+    "styles": "style",
+    "scenes": "scene",
+    "poses": "pose",
+}
+
+
+class StoryboardRequest(BaseModel):
+    scenario: str = Field(min_length=10, max_length=4000)
+    scene_count: int = Field(default=5, ge=MIN_SCENES, le=MAX_SCENES)
+    name: str | None = None
+    generate: bool = True
+
+
+def _first_lookup_key(db_type: str, db_name: str) -> str:
+    lookup = get_db_lookup(db_type, db_name)
+    keys = [k for k in lookup if k != "NONE"]
+    return keys[0] if keys else "NONE"
+
+
+@router.post("/api/ai/storyboard")
+async def create_storyboard(req: StoryboardRequest) -> JsonDict:
+    """Split a scenario into scenes, lock one character reference, and queue it."""
+    if req.name:
+        name = _validate_database_name(req.name)
+    else:
+        name = "story_" + datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+    raw = await _call_openrouter(
+        build_planner_messages(req.scenario, req.scene_count), temperature=0.7
+    )
+    try:
+        plan = parse_plan(raw, req.scene_count)
+    except StoryboardPlanError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+    reference = plan["reference"]
+    save_db(scenes_db(plan["title"], req.scenario, plan["scenes"]), name=name, db_type="prompts")
+    for db_type in STORYBOARD_DB_TYPES:
+        text = reference.get(REFERENCE_FIELD_BY_DB[db_type], "")
+        save_db(single_value_db(plan["title"], text), name=name, db_type=db_type)
+    for db_type in ("prompts", *STORYBOARD_DB_TYPES):
+        set_active_db_name(db_type, name)
+
+    selection = {
+        field: _first_lookup_key(db_type, name) for db_type, field in REFERENCE_FIELD_BY_DB.items()
+    }
+
+    result: JsonDict = {
+        "name": name,
+        "title": plan["title"],
+        "reference": reference,
+        "scenes": plan["scenes"],
+        "selection": selection,
+    }
+    if req.generate:
+        result["batch"] = await generate_batch(BatchRequest(**selection))
+    return result
+
+
+@router.get("/api/sessions/{session_id}/export")
+async def export_session(session_id: str) -> Response:
+    """Download a session as numbered PNG frames ready for video montage."""
+    async with state_lock:
+        st = load_state()
+    items = [i for i in st if i.get("session_id") == session_id]
+    if not items:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    titles: dict[int, str] = {}
+    db_name = items[0].get("db_name")
+    if db_name and (DATABASES_DIR / "prompts" / f"{db_name}.json").exists():
+        for seg in load_db(name=db_name).get("segments", []):
+            if seg.get("title"):
+                titles[int(seg.get("index", 0))] = str(seg["title"])
+
+    folder = f"{db_name or 'storyboard'}_{session_id[:8]}"
+    data, exported = build_montage_zip(items, _find_item_image, titles, folder=folder)
+    if exported == 0:
+        raise HTTPException(status_code=409, detail="This session has no completed images yet.")
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{folder}.zip"'},
+    )
+
+
+# =====================================================================
 # 6. Gallery & Session Routes
 # =====================================================================
 @router.get("/api/state")
@@ -1520,9 +1623,16 @@ async def get_image_data(item_id: str) -> FileResponse:
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    local_path = IMAGES_DIR / f"{item_id}.png"
+    path = _find_item_image(item)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Image file not found")
+    return FileResponse(path)
+
+
+def _find_item_image(item: JsonDict) -> Path | None:
+    local_path = IMAGES_DIR / f"{item['id']}.png"
     if local_path.exists():
-        return FileResponse(local_path)
+        return local_path
 
     session_id = item.get("session_id", "")
     chunk_number = item.get("chunk_number", "0")
@@ -1534,9 +1644,8 @@ async def get_image_data(item_id: str) -> FileResponse:
             reverse=True,
         )
         if images:
-            return FileResponse(images[0])
-
-    raise HTTPException(status_code=404, detail="Image file not found")
+            return images[0]
+    return None
 
 
 # =====================================================================

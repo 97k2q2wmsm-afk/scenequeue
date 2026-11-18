@@ -412,6 +412,13 @@ function renderGallery() {
               &#9654; Run Failed
             </button>
           ` : ''}
+          ${sd.completed > 0 ? `
+            <a href="/api/sessions/${encodeURIComponent(currentSessionId)}/export" download
+              title="Download numbered PNG frames for video montage"
+              style="background:#6d28d9;color:#fff;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:4px;">
+              &#8681; Export PNGs
+            </a>
+          ` : ''}
         </div>
         <p style="font-size:9px;color:#4b5563;font-family:monospace;margin-top:2px;user-select:text;">${currentSessionId}</p>
       </div>
@@ -1153,6 +1160,87 @@ async function submitBatch() {
     currentSessionData = { config: result.items[0]?.config || {}, total: result.count, completed: 0, pending: result.count, failed: 0 };
     await loadSessionItems();
   } catch(e) {
+    alert('Connection error.');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalText;
+  }
+}
+
+// ── Scenario → Storyboard Modal ─────────────────────────────────────────────
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function openStoryboardModal() {
+  const modal = document.getElementById('storyboardModal');
+  const result = document.getElementById('sbResult');
+  if (result) { result.style.display = 'none'; result.innerHTML = ''; }
+  if (modal) modal.style.display = 'flex';
+}
+
+function closeStoryboardModal() {
+  const modal = document.getElementById('storyboardModal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function submitStoryboard() {
+  const scenario = document.getElementById('sbScenario').value.trim();
+  if (scenario.length < 10) {
+    alert('Please describe the scenario in a little more detail.');
+    return;
+  }
+  const btn = document.getElementById('btnSubmitStoryboard');
+  const originalText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:8px;"><div class="spinner" style="width:16px;height:16px;"></div> Writing scenes...</span>';
+
+  const payload = {
+    scenario,
+    scene_count: Math.min(12, Math.max(2, parseInt(document.getElementById('sbCount').value, 10) || 5)),
+    generate: document.getElementById('sbGenerate').checked,
+  };
+  const name = document.getElementById('sbName').value.trim();
+  if (name) payload.name = name;
+
+  try {
+    const res = await fetch('/api/ai/storyboard', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      const detail = Array.isArray(data.detail) ? data.detail.map(d => d.msg).join(', ') : data.detail;
+      alert('Error: ' + (detail || 'Failed to create storyboard'));
+      return;
+    }
+
+    if (data.batch) {
+      const batch = data.batch;
+      closeStoryboardModal();
+      showToast(`${data.scenes.length} scenes queued: ${data.title}`);
+      lastSessionId = batch.session_id;
+      currentView = 'sessionDetail';
+      currentSessionId = batch.session_id;
+      loadedSessionId = batch.session_id;
+      currentSessionData = { config: batch.items[0]?.config || {}, total: batch.count, completed: 0, pending: batch.count, failed: 0 };
+      await loadSessionItems();
+      return;
+    }
+
+    const ref = data.reference || {};
+    const result = document.getElementById('sbResult');
+    result.innerHTML = `
+      <p style="font-size:12px;color:#a78bfa;font-weight:600;">${escapeHtml(data.title)} · saved as <code>${escapeHtml(data.name)}</code></p>
+      <p style="font-size:11px;color:#9ca3af;"><b>Character:</b> ${escapeHtml(ref.subject)} · ${escapeHtml(ref.appearance)} · ${escapeHtml(ref.wardrobe)}</p>
+      <p style="font-size:11px;color:#9ca3af;"><b>Style:</b> ${escapeHtml(ref.style)}</p>
+      <ol style="font-size:11px;color:#d1d5db;padding-left:18px;display:flex;flex-direction:column;gap:6px;">
+        ${data.scenes.map(s => `<li><b>${escapeHtml(s.title)}</b><br><span style="color:#6b7280;">${escapeHtml(s.prompt)}</span></li>`).join('')}
+      </ol>
+      <p style="font-size:11px;color:#6b7280;">The databases are now active. Edit them in Prompt Templates, then use New Batch to generate.</p>`;
+    result.style.display = 'flex';
+  } catch (e) {
     alert('Connection error.');
   } finally {
     btn.disabled = false;
@@ -2536,7 +2624,7 @@ document.addEventListener('touchend', (e) => {
   if (currentView !== 'sessionDetail') return;
   
   // Prevent swipe gesture if a modal or popup is open
-  const modals = ['promptsModal', 'batchModal', 'editModal', 'settingsModal'];
+  const modals = ['promptsModal', 'batchModal', 'editModal', 'settingsModal', 'storyboardModal'];
   for (const mId of modals) {
     const el = document.getElementById(mId);
     if (el && el.style.display !== 'none' && el.style.display !== '') return;
